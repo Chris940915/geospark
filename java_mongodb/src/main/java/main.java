@@ -90,7 +90,7 @@ public class main implements Serializable{
     static GridType joinQueryPartitioningType;
 
     /** The each query loop times. */
-    static int eachQueryLoopTimes = 5;
+    static int eachQueryLoopTimes = 1;
 
     /** The k NN query point. */
     static Point kNNQueryPoint;
@@ -123,14 +123,15 @@ public class main implements Serializable{
 //                .getOrCreate();
 
         SparkSession spark = SparkSession.builder()
-                .master("spark://ec2-52-12-47-15.us-west-2.compute.amazonaws.com")
+//                .master("spark://ec2-52-12-47-15.us-west-2.compute.amazonaws.com")
+                .master("local[*]")
                 .appName("MongoSparkConnectorIntro")
-                .config("spark.mongodb.input.uri", "mongodb://127.0.0.1/spark.test2")
-                .config("spark.mongodb.output.uri", "mongodb://127.0.0.1/spark.test2")
+                .config("spark.mongodb.input.uri", "mongodb://52.37.188.210/spark2.1m")
+                .config("spark.mongodb.output.uri", "mongodb://52.37.188.210/spark2.1m")
                 .getOrCreate();
 
         sc = new JavaSparkContext(spark.sparkContext());
-
+        PointRDDIndexType = IndexType.RTREE;
         JavaMongoRDD<Document> rdd = MongoSpark.load(sc);
 
 //        Coordinate coor = new Coordinate();
@@ -141,7 +142,7 @@ public class main implements Serializable{
 //        p.getCoordinateSequence();
 
 
-        Dataset<Row> implicitDS = MongoSpark.load(sc).toDF();
+        //Dataset<Row> implicitDS = MongoSpark.load(sc).toDF();
 
         //JavaRDD<Point> javardd = Adapter.toJavaRdd(implicitDS);
 
@@ -150,14 +151,14 @@ public class main implements Serializable{
 //        testSpatialRangeQuery(pointrdd);
 
 
-        implicitDS.createOrReplaceTempView("test1");
-        Dataset<Row> implicit_centenar = spark.sql("SELECT loc FROM test1");
+        //implicitDS.createOrReplaceTempView("test1");
+        //Dataset<Row> implicit_centenar = spark.sql("SELECT loc FROM test1");
 
         long start = System.currentTimeMillis();
         //explicit Dataset
         Dataset<Character> explicitDS = MongoSpark.load(sc).toDS(Character.class);
-        explicitDS.createOrReplaceTempView("test2");
-        Dataset<Row> explicit_centenar = spark.sql("SELECT x, y FROM test2");
+        explicitDS.createOrReplaceTempView("origin");
+        Dataset<Row> explicit_centenar = spark.sql("SELECT x, y FROM origin");
 
         List<Point> asdf = explicit_centenar.toJavaRDD().map(new Function<Row, Point>() {
             public Point call(Row row){
@@ -168,20 +169,21 @@ public class main implements Serializable{
 
                 return return_point;}
         }).collect();
+
         JavaRDD<Point> point_Rdd = sc.parallelize(asdf);
+
 
         objectRDD = new PointRDD(point_Rdd, StorageLevel.MEMORY_ONLY());
         objectRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY());
 
         long end = System.currentTimeMillis();
 
-        testSpatialRangeQuery(point_Rdd);
-        System.out.println("Load Time:" + (end-start)/1000.0);
-
+        //testSpatialRangeQuery(point_Rdd);
         //testSpatialRangeQueryUsingIndex(point_Rdd);
         //testSpatialKnnQuery(point_Rdd);
-        //testSpatialKnnQueryUsingIndex(point_Rdd);
-
+        testSpatialKnnQueryUsingIndex(point_Rdd);
+        double load_time_ = (end-start)/1000.0;
+        System.out.println("Load time : " + load_time_);
         sc.close();
 
     }
@@ -227,9 +229,9 @@ public class main implements Serializable{
             double time_ = (end-start)/1000.0;
 
             total += time_;
-            System.out.println("time : " + time_);
+            System.out.println("Range time : " + (i+1) +"--" + time_);
 
-            //System.out.println(resultSize);
+            System.out.println(resultSize);
         }
 
         System.out.println("total : " + total);
@@ -276,7 +278,7 @@ public class main implements Serializable{
             double time_ = (end-start)/1000.0;
 
             total += time_;
-            System.out.println("time : " + time_);
+            System.out.println("Range Index time : " +(i+1) + "--" + time_);
             System.out.println(resultSize);
         }
         System.out.println("total : " + total);
@@ -302,7 +304,7 @@ public class main implements Serializable{
 
             long start = System.currentTimeMillis();
 
-            List<Point> result = KNNQuery.SpatialKnnQuery(objectRDD, kNNQueryPoint, 100,false);
+            List<Point> result = KNNQuery.SpatialKnnQuery(objectRDD, kNNQueryPoint, 1000,false);
             assert result.size()>-1;
 
             long end = System.currentTimeMillis();
@@ -341,7 +343,7 @@ public class main implements Serializable{
 
             long start = System.currentTimeMillis();
 
-            List<Point> result = KNNQuery.SpatialKnnQuery(objectRDD, kNNQueryPoint, 100, true);
+            List<Point> result = KNNQuery.SpatialKnnQuery(objectRDD, kNNQueryPoint, 1000, true);
             assert result.size()>-1;
 
             long end = System.currentTimeMillis();
@@ -361,7 +363,6 @@ public class main implements Serializable{
 final class Character implements Serializable {
     private double x;
     private double y;
-    private double[] loc;
 
     public double getX() {
         return x;
