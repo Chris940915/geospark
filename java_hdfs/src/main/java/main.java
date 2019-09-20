@@ -1,10 +1,13 @@
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+import com.vividsolutions.jts.geom.*;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.serializer.KryoSerializer;
 import org.apache.spark.storage.StorageLevel;
@@ -19,10 +22,6 @@ import org.datasyslab.geospark.spatialRDD.CircleRDD;
 import org.datasyslab.geospark.spatialRDD.PointRDD;
 import org.datasyslab.geospark.spatialRDD.PolygonRDD;
 
-import com.vividsolutions.jts.geom.Coordinate;
-import com.vividsolutions.jts.geom.Envelope;
-import com.vividsolutions.jts.geom.GeometryFactory;
-import com.vividsolutions.jts.geom.Point;
 import org.datasyslab.geosparkviz.core.Serde.GeoSparkVizKryoRegistrator;
 
 public class main implements Serializable{
@@ -34,7 +33,7 @@ public class main implements Serializable{
 
     /** The Point RDD input location. */
     static String PointRDDInputLocation;
-
+    static String PointRDDInputLocation_2;
     /** The Point RDD offset. */
     static Integer PointRDDOffset;
 
@@ -109,9 +108,10 @@ public class main implements Serializable{
 
         long start = System.currentTimeMillis();
 
-        String resourceFolder = "hdfs:///geospark/resources/";
 
-        PointRDDInputLocation = resourceFolder+"streets.csv";
+        String resourceFolder = "hdfs://34.222.72.136:54311/geospark/join/";
+        PointRDDInputLocation = resourceFolder+"hdfs_1m_1.csv";
+        PointRDDInputLocation_2 = resourceFolder+"hdfs_1m_2.csv";
 
         sc = new JavaSparkContext(conf);
 
@@ -132,13 +132,19 @@ public class main implements Serializable{
 
 
         try {
-            testSpatialRangeQuery();
-            testSpatialRangeQueryUsingIndex();
-            testSpatialKnnQuery();
-            testSpatialKnnQueryUsingIndex();
+            //testSpatialRangeQuery();
+            //testSpatialRangeQueryUsingIndex();
+            //testSpatialKnnQuery();
+            //testSpatialKnnQueryUsingIndex();
+
+            SpatialKnn_joinQuery();
+            SpatialKnn_joinQueryUsingIndex();
+
         } catch (Exception e) {
             e.printStackTrace();
         }
+
+        sc.stop();
     }
 
     public static void testSpatialRangeQuery() throws Exception {
@@ -301,5 +307,179 @@ public class main implements Serializable{
             System.out.println(result.size());
         }
         System.out.println("total : " + total);
+    }
+
+
+    public static void SpatialKnn_joinQuery() throws Exception {
+        objectRDD = new PointRDD(sc, PointRDDInputLocation, PointRDDOffset, PointRDDSplitter, true, StorageLevel.MEMORY_ONLY());
+        //objectRDD = new PointRDD(rdd, StorageLevel.MEMORY_ONLY());
+        objectRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY());
+
+        double total = 0;
+
+        for(int i=0;i<11;i++) {
+            System.out.println(i);
+            double sub_total = 0;
+            double random_no_1 = randomGenerator.nextDouble() * range_x + max_x;
+            double random_no_3 = randomGenerator.nextDouble() * range_y + max_y;
+
+            Coordinate coor = new Coordinate();
+            coor.x = random_no_1;
+            coor.y = random_no_3;
+
+            kNNQueryPoint = gf.createPoint(coor);
+
+            long start = System.currentTimeMillis();
+
+            List<Point> result = KNNQuery.SpatialKnnQuery(objectRDD, kNNQueryPoint, 100,false);
+            assert result.size()>-1;
+
+            long end = System.currentTimeMillis();
+            double time_ = (end-start)/1000.0;
+            sub_total += time_;
+            // ---------------------------------------------------------------------
+
+            ArrayList<Coordinate> points = new ArrayList<Coordinate>();
+            for(i=0; i<100; i++){
+                points.add(new Coordinate(result.get(i).getX(), result.get(i).getY()));
+            }
+
+            points.add(new Coordinate(result.get(0).getX(), result.get(0).getY()));
+
+            Polygon polygon_ = gf.createPolygon((Coordinate[]) points.toArray(new Coordinate[]{}));
+
+            List<Polygon> aaaa= new ArrayList<>();
+            aaaa.add(polygon_);
+            JavaRDD<Polygon> jr = sc.parallelize(aaaa);
+
+            double tot = testSpatialJoinQuery(jr, sub_total);
+
+
+            total += tot;
+
+        }
+        System.out.println("total : " + total);
+
+    }
+
+    public static double testSpatialJoinQuery(JavaRDD<Polygon> jr, double sub_total) throws Exception {
+        //queryWindowRDD = new PolygonRDD(sc, PolygonRDDInputLocation, PolygonRDDStartOffset, PolygonRDDEndOffset, PolygonRDDSplitter, true);
+
+        queryWindowRDD = new PolygonRDD(jr, StorageLevel.MEMORY_ONLY());
+        //objectRDD = new PointRDD(rdd2, StorageLevel.MEMORY_ONLY());
+        objectRDD = new PointRDD(sc, PointRDDInputLocation_2, PointRDDOffset, PointRDDSplitter, true, StorageLevel.MEMORY_ONLY());
+
+        double return_time = 0;
+
+
+        for (int i=0; i<11; i++) {
+            double sub = sub_total;
+
+            long start = System.currentTimeMillis();
+
+            objectRDD.spatialPartitioning(joinQueryPartitioningType);
+            queryWindowRDD.spatialPartitioning(objectRDD.getPartitioner());
+
+            objectRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
+            queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
+
+            long resultSize = JoinQuery.SpatialJoinQuery(objectRDD, queryWindowRDD, false, true).count();
+            assert resultSize > 0;
+
+            long end = System.currentTimeMillis();
+            double time_ = (end - start) / 1000.0;
+            sub += time_;
+            return_time += sub;
+
+            System.out.println("KNN-JOIN Time:" + sub);
+        }
+        return return_time;
+    }
+
+
+    public static void SpatialKnn_joinQueryUsingIndex() throws Exception {
+        objectRDD = new PointRDD(sc, PointRDDInputLocation, PointRDDOffset, PointRDDSplitter, true, StorageLevel.MEMORY_ONLY());
+        //objectRDD = new PointRDD(rdd, StorageLevel.MEMORY_ONLY());
+        objectRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY());
+
+        double total = 0;
+
+        for(int i=0;i<1;i++)
+        {
+            System.out.println(i);
+            double sub_total = 0;
+            double random_no_1 = randomGenerator.nextDouble() * range_x + max_x;
+            double random_no_3 = randomGenerator.nextDouble() * range_y + max_y;
+
+            Coordinate coor = new Coordinate();
+            coor.x = random_no_1;
+            coor.y = random_no_3;
+
+            kNNQueryPoint = gf.createPoint(coor);
+
+            long start = System.currentTimeMillis();
+
+            List<Point> result = KNNQuery.SpatialKnnQuery(objectRDD, kNNQueryPoint, 100,false);
+            assert result.size()>-1;
+            long end = System.currentTimeMillis();
+            double time_ = (end-start)/1000.0;
+            // ---------------------------------------------------------------------
+            sub_total+= time_;
+
+            ArrayList<Coordinate> points = new ArrayList<Coordinate>();
+            for(i=0; i<100; i++){
+                points.add(new Coordinate(result.get(i).getX(), result.get(i).getY()));
+            }
+            points.add(new Coordinate(result.get(0).getX(), result.get(0).getY()));
+
+            Polygon polygon_ = gf.createPolygon((Coordinate[]) points.toArray(new Coordinate[]{}));
+
+            List<Polygon> aaaa= new ArrayList<>();
+            aaaa.add(polygon_);
+            JavaRDD<Polygon> jr = sc.parallelize(aaaa);
+
+            double tot = testSpatialJoinQueryUsingIndex(jr, sub_total);
+
+            total += tot;
+        }
+        System.out.println("total : " + total);
+
+    }
+    /**
+     * Test spatial join query using index.
+     *
+     * @throws Exception the exception
+     */
+    public static double testSpatialJoinQueryUsingIndex(JavaRDD<Polygon> jr, double sub_total) throws Exception {
+        //queryWindowRDD = new PolygonRDD(sc, PolygonRDDInputLocation, PolygonRDDStartOffset, PolygonRDDEndOffset, PolygonRDDSplitter, true);
+
+        queryWindowRDD = new PolygonRDD(jr, StorageLevel.MEMORY_ONLY());
+        objectRDD = new PointRDD(sc, PointRDDInputLocation_2, PointRDDOffset, PointRDDSplitter, true, StorageLevel.MEMORY_ONLY());
+
+        double return_time = 0;
+
+        for (int i=0; i<11; i++) {
+            double sub = sub_total;
+
+            long start = System.currentTimeMillis();
+            objectRDD.spatialPartitioning(joinQueryPartitioningType);
+            queryWindowRDD.spatialPartitioning(objectRDD.getPartitioner());
+
+            objectRDD.buildIndex(PointRDDIndexType,true);
+
+            objectRDD.indexedRDD.persist(StorageLevel.MEMORY_ONLY());
+            queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
+
+            long resultSize = JoinQuery.SpatialJoinQuery(objectRDD, queryWindowRDD, true, false).count();
+            assert resultSize > 0;
+            long end = System.currentTimeMillis();
+            double time_ = (end - start) / 1000.0;
+            sub += time_;
+            return_time += sub;
+
+            System.out.println("KNN-JOIN using index time :" + sub);
+        }
+        return return_time;
+
     }
 }
