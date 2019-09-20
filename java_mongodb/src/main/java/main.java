@@ -539,7 +539,7 @@ public class main implements Serializable {
         queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
         double return_time = 0;
 
-        for(int i=0;i<11;i++)
+        for(int i=0;i<eachQueryLoopTimes;i++)
         {
             double sub = sub_total;
 
@@ -581,7 +581,7 @@ public class main implements Serializable {
         objectRDD.indexedRDD.persist(StorageLevel.MEMORY_ONLY());
         queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
 
-        for(int i=0;i<11;i++)
+        for(int i=0;i<eachQueryLoopTimes;i++)
         {
             double sub = sub_total;
 
