@@ -532,7 +532,11 @@ public class main implements Serializable {
 
         objectRDD = new PointRDD(rdd2, StorageLevel.MEMORY_ONLY());
         //objectRDD = new PointRDD(sc, PointRDDInputLocation, PointRDDOffset, PointRDDSplitter, true, StorageLevel.MEMORY_ONLY());
+        objectRDD.spatialPartitioning(joinQueryPartitioningType);
+        queryWindowRDD.spatialPartitioning(objectRDD.getPartitioner());
 
+        objectRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
+        queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
         double return_time = 0;
 
         for(int i=0;i<11;i++)
@@ -541,11 +545,6 @@ public class main implements Serializable {
 
             long start = System.currentTimeMillis();
 
-            objectRDD.spatialPartitioning(joinQueryPartitioningType);
-            queryWindowRDD.spatialPartitioning(objectRDD.getPartitioner());
-
-            objectRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
-            queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
             long resultSize = JoinQuery.SpatialJoinQuery(objectRDD,queryWindowRDD,false,true).count();
             assert resultSize>0;
 
@@ -574,19 +573,20 @@ public class main implements Serializable {
         PointRDDIndexType = IndexType.RTREE;
         double return_time = 0;
 
+        objectRDD.spatialPartitioning(joinQueryPartitioningType);
+        queryWindowRDD.spatialPartitioning(objectRDD.getPartitioner());
+
+        objectRDD.buildIndex(PointRDDIndexType,true);
+
+        objectRDD.indexedRDD.persist(StorageLevel.MEMORY_ONLY());
+        queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
+
         for(int i=0;i<11;i++)
         {
             double sub = sub_total;
 
             long start = System.currentTimeMillis();
 
-            objectRDD.spatialPartitioning(joinQueryPartitioningType);
-            queryWindowRDD.spatialPartitioning(objectRDD.getPartitioner());
-
-            objectRDD.buildIndex(PointRDDIndexType,true);
-
-            objectRDD.indexedRDD.persist(StorageLevel.MEMORY_ONLY());
-            queryWindowRDD.spatialPartitionedRDD.persist(StorageLevel.MEMORY_ONLY());
 
             long resultSize = JoinQuery.SpatialJoinQuery(objectRDD,queryWindowRDD,true,false).count();
             assert resultSize>0;
